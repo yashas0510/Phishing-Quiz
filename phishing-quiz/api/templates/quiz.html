@@ -3,46 +3,71 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Phishing Awareness Quiz</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <meta name="description" content="Test your phishing detection skills with realistic, modern scam scenarios.">
+    <title>Phishing Awareness Quiz — Spot Modern Scams</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9B%A1%EF%B8%8F%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <div class="quiz-container">
-        <h1>Phishing Awareness Quiz</h1>
-        <form id="quiz-form">
-            {% for question in questions %}
-            <div class="question">
-                <p><strong>Q{{ question.id }}:</strong> {{ question.text }}</p>
-                {% for option in question.options %}
-                <label>
-                    <input type="radio" name="q{{ question.id }}" value="{{ option }}">
-                    {{ option }}
-                </label><br>
-                {% endfor %}
+    <header class="hero">
+        <div class="hero-inner">
+            <div class="hero-badge">🛡️ Security awareness training</div>
+            <h1>Phishing Awareness Quiz</h1>
+            <p class="subtitle">
+                14 realistic scenarios — QR phishing, MFA fatigue, OAuth scams, BEC, AI-generated
+                lures and more. Some messages are <strong>legitimate</strong>, so judge each one carefully.
+            </p>
+            <div class="progress-wrap" aria-live="polite">
+                <div class="progress-label"><span id="progress-text">0 of {{ questions|length }} answered</span><span id="progress-pct"></span></div>
+                <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
             </div>
+        </div>
+    </header>
+
+    <main class="quiz-container">
+        <form id="quiz-form" novalidate>
+            {% for question in questions %}
+            <section class="question-card" data-qid="{{ question.id }}">
+                <div class="q-meta">
+                    <span class="q-num">Scenario {{ question.id }}</span>
+                    <span class="q-cat">{{ question.category }}</span>
+                    <span class="q-diff" title="Difficulty {{ question.difficulty }}/3">●{{ '●' * (question.difficulty - 1) }}{{ '○' * (3 - question.difficulty) }}</span>
+                </div>
+
+                <div class="msg-mock">
+                    {% if question.sender %}<div class="msg-row"><span class="msg-label">From</span><span class="msg-val msg-from">{{ question.sender }}</span></div>{% endif %}
+                    {% if question.subject %}<div class="msg-row"><span class="msg-label">Subject</span><span class="msg-val">{{ question.subject }}</span></div>{% endif %}
+                    <div class="msg-body">{{ question.body }}</div>
+                </div>
+
+                <p class="q-prompt">{{ question.prompt }}</p>
+
+                <div class="options" role="radiogroup" aria-label="Scenario {{ question.id }} answer">
+                    {% for option in question.options %}
+                    <label class="option">
+                        <input type="radio" name="q{{ question.id }}" value="{{ option }}">
+                        <span class="option-dot" aria-hidden="true"></span>
+                        <span class="option-text">{{ option }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </section>
             {% endfor %}
-            <button type="button" id="submit-btn">Submit</button>
+
+            <div class="actions">
+                <button type="button" id="submit-btn">Check my score</button>
+                <button type="button" id="reset-btn" class="ghost">Reset answers</button>
+            </div>
+            <p class="hint" id="form-hint" role="status"></p>
         </form>
-        <div id="results"></div>
-    </div>
-    <script src="/static/script.js"></script>
-    <script type="text/javascript">
-    (function (l) {
-      if (l.search[1] === "/") {
-        var decoded = l.search
-          .slice(1)
-          .split("&")
-          .map(function (s) {
-            return s.replace(/~and~/g, "&");
-          })
-          .join("?");
-        window.history.replaceState(
-          null,
-          null,
-          l.pathname.slice(0, -1) + decoded + l.hash
-        );
-      }
-    })(window.location);
-  </script>
+
+        <div id="results" aria-live="polite"></div>
+    </main>
+
+    <footer class="footer">
+        <p>Tip: verify senders out-of-band, hover before you click, and never approve an MFA prompt you didn't trigger.</p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
