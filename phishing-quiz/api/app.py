@@ -427,6 +427,13 @@ questions = [
 ]
 
 
+# Bound scoring payloads: the quiz submits a few hundred bytes at most.
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
+
+ALLOWED_IDS = frozenset(str(q["id"]) for q in questions)
+MAX_ANSWER_LENGTH = 64
+
+
 @app.route("/")
 def index():
     return render_template("quiz.html", questions=questions)
@@ -437,19 +444,46 @@ def health():
     return jsonify({"status": "ok", "questions": len(questions)})
 
 
+@app.errorhandler(400)
+@app.errorhandler(404)
+@app.errorhandler(405)
+@app.errorhandler(413)
+def _client_error(error):
+    # Generic JSON errors only: never leak routing internals or stack traces.
+    return jsonify({"error": "Request could not be processed."}), error.code
+
+
+@app.errorhandler(500)
+def _server_error(error):
+    return jsonify({"error": "Internal error. Please try again."}), 500
+
+
 @app.route("/check", methods=["POST"])
 def check():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
     user_answers = data.get("answers", {})
     if not isinstance(user_answers, dict):
-        user_answers = {}
+        return jsonify({"error": "'answers' must be an object mapping question ids to answers."}), 400
+
+    # Accept only known question ids with short string answers. Anything else
+    # is ignored rather than echoed, so crafted input cannot be reflected.
+    cleaned = {}
+    for key, value in user_answers.items():
+        qid = str(key)
+        if qid not in ALLOWED_IDS:
+            continue
+        if not isinstance(value, str) or len(value) > MAX_ANSWER_LENGTH:
+            continue
+        cleaned[qid] = value
 
     results = {}
     feedback = []
     for question in questions:
         qid = str(question["id"])
         correct = question["answer"]
-        user_response = str(user_answers.get(qid, "") or "")
+        user_response = cleaned.get(qid, "")
         is_correct = user_response == correct
         results[qid] = is_correct
         feedback.append(

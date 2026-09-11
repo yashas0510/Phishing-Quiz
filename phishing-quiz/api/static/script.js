@@ -1,26 +1,47 @@
-document.addEventListener("DOMContentLoaded", function () {
-    const form = document.getElementById("quiz-form");
-    const submitBtn = document.getElementById("submit-btn");
-    const resetBtn = document.getElementById("reset-btn");
-    const hint = document.getElementById("form-hint");
+/* Phishing Awareness Quiz — form progress, submission, and results.
+   No innerHTML, no eval, no inline handlers: all DOM is built with
+   createElement/textContent so server data can never execute as markup. */
+(function () {
+    'use strict';
 
-    submitBtn.addEventListener("click", submitQuiz);
-    resetBtn.addEventListener("click", resetQuiz);
-    form.addEventListener("change", updateProgress);
-    updateProgress();
+    function el(tag, cls, text) {
+        const node = document.createElement(tag);
+        if (cls) node.className = cls;
+        if (text !== undefined && text !== null) node.textContent = text;
+        return node;
+    }
+
+    function asText(value) {
+        if (typeof value !== 'string') return '';
+        return value;
+    }
+
+    function init() {
+        const form = document.getElementById('quiz-form');
+        const submitBtn = document.getElementById('submit-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const hint = document.getElementById('form-hint');
+        if (!form || !submitBtn || !resetBtn || !hint) return;
+
+        submitBtn.addEventListener('click', submitQuiz);
+        resetBtn.addEventListener('click', resetQuiz);
+        form.addEventListener('change', updateProgress);
+        updateProgress();
+    }
 
     function totalQuestions() {
-        return document.querySelectorAll(".question-card").length;
+        return document.querySelectorAll('.question-card').length;
     }
 
     function collectAnswers() {
-        const formData = new FormData(form);
+        const form = document.getElementById('quiz-form');
         const answers = {};
-        // FormData only contains checked radios; names are like "q1" -> strip "q"
-        for (const [name, value] of formData.entries()) {
-            if (name.startsWith("q")) {
-                answers[name.slice(1)] = value;
-            }
+        const checked = form.querySelectorAll('input[type="radio"]:checked');
+        for (const input of checked) {
+            if (input.name.charAt(0) !== 'q') continue;
+            const qid = input.name.slice(1);
+            if (!/^\d+$/.test(qid)) continue;
+            answers[qid] = input.value;
         }
         return answers;
     }
@@ -29,112 +50,170 @@ document.addEventListener("DOMContentLoaded", function () {
         const total = totalQuestions();
         const answered = Object.keys(collectAnswers()).length;
         const pct = total ? Math.round((answered / total) * 100) : 0;
-        document.getElementById("progress-text").textContent = `${answered} of ${total} answered`;
-        document.getElementById("progress-pct").textContent = `${pct}%`;
-        document.getElementById("progress-fill").style.width = `${pct}%`;
-        if (answered === total) {
-            hint.textContent = "All scenarios answered — ready to check your score.";
-        } else {
-            hint.textContent = "";
-        }
+        document.getElementById('progress-text').textContent =
+            answered + ' of ' + total + ' answered';
+        document.getElementById('progress-pct').textContent = pct + '%';
+        document.getElementById('progress-fill').style.width = pct + '%';
+        document.getElementById('form-hint').textContent =
+            answered === total ? 'All scenarios answered. Ready to check your score.' : '';
     }
 
     function resetQuiz() {
-        form.reset();
-        document.getElementById("results").innerHTML = "";
+        document.getElementById('quiz-form').reset();
+        const results = document.getElementById('results');
+        while (results.firstChild) results.removeChild(results.firstChild);
         updateProgress();
-        hint.textContent = "Answers cleared. Good luck on the retake.";
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        document.getElementById('form-hint').textContent = 'Answers cleared.';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     function submitQuiz() {
+        const submitBtn = document.getElementById('submit-btn');
+        const hint = document.getElementById('form-hint');
         const answers = collectAnswers();
         const total = totalQuestions();
         const unanswered = total - Object.keys(answers).length;
         if (unanswered > 0) {
-            const proceed = confirm(
-                `You have ${unanswered} unanswered scenario(s). Submit anyway? (Unanswered counts as incorrect.)`
+            const proceed = window.confirm(
+                'You have ' + unanswered + ' unanswered scenario(s). ' +
+                'Submit anyway? Unanswered scenarios count as incorrect.'
             );
             if (!proceed) return;
         }
 
         submitBtn.disabled = true;
-        submitBtn.textContent = "Checking…";
-        hint.textContent = "";
+        submitBtn.textContent = 'Checking…';
+        hint.textContent = '';
 
-        fetch("/check", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+        window.fetch('/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ answers: answers })
-        })
-            .then((response) => {
-                if (!response.ok) throw new Error(`Server returned ${response.status}`);
-                return response.json();
-            })
-            .then((data) => renderResults(data))
-            .catch((err) => {
-                const resultsDiv = document.getElementById("results");
-                resultsDiv.innerHTML = `<div class="feedback-item incorrect"><p><strong>Error:</strong> ${escapeHtml(err.message)}. Is the server running?</p></div>`;
-            })
-            .finally(() => {
-                submitBtn.disabled = false;
-                submitBtn.textContent = "Check my score";
-            });
+        }).then(function (response) {
+            if (!response.ok) {
+                throw new Error('Server returned status ' + response.status);
+            }
+            return response.json();
+        }).then(function (data) {
+            renderResults(data);
+        }).catch(function (err) {
+            const results = document.getElementById('results');
+            while (results.firstChild) results.removeChild(results.firstChild);
+            const box = el('div', 'feedback-item incorrect');
+            const p = el('p', null, 'Could not check your answers (' + err.message + '). Please try again.');
+            box.appendChild(p);
+            results.appendChild(box);
+        }).then(function () {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Check my score';
+        });
     }
 
-    function grade(score, total) {
+    function gradeFor(score, total) {
         const pct = total ? score / total : 0;
-        if (pct >= 0.86) return { cls: "grade-great", label: "Excellent — sharp eye", tip: "You judge instead of guessing. Keep verifying senders out-of-band and navigating to sites yourself." };
-        if (pct >= 0.64) return { cls: "grade-ok", label: "Getting there — stay skeptical", tip: "Review the red flags below. Slow down on urgency + authority combos (CEO wires, gift cards, expiring passwords)." };
-        return { cls: "grade-risk", label: "At risk — review carefully", tip: "Attackers rely on rushing you. Re-read each explanation, then retake the quiz — assume unexpected links, QR codes, attachments and MFA prompts are hostile until proven otherwise." };
+        if (pct >= 0.86) {
+            return {
+                cls: 'grade-great',
+                label: 'Excellent result',
+                tip: 'You judged each scenario on its evidence. Keep verifying senders through a separate channel and navigating to sites yourself.'
+            };
+        }
+        if (pct >= 0.64) {
+            return {
+                cls: 'grade-ok',
+                label: 'Developing judgment',
+                tip: 'Review the red flags below. Slow down whenever urgency and authority appear together, such as payment orders or account warnings.'
+            };
+        }
+        return {
+            cls: 'grade-risk',
+            label: 'Needs improvement',
+            tip: 'Attackers rely on rushing you. Re-read each explanation, then retake the quiz. Treat unexpected links, codes, attachments, and sign-in prompts as hostile until verified.'
+        };
     }
 
     function renderResults(data) {
-        const resultsDiv = document.getElementById("results");
-        resultsDiv.innerHTML = "";
+        const results = document.getElementById('results');
+        while (results.firstChild) results.removeChild(results.firstChild);
 
-        const g = grade(data.score, data.total);
-        const scoreCard = document.createElement("div");
-        scoreCard.className = "score-card";
-        scoreCard.innerHTML =
-            `<div class="score-grade ${g.cls}">${escapeHtml(g.label)}</div>` +
-            `<div class="score-num">Score: ${data.score} / ${data.total}</div>` +
-            `<p class="score-tip">${escapeHtml(g.tip)}</p>`;
-        resultsDiv.appendChild(scoreCard);
+        const score = typeof data.score === 'number' ? data.score : 0;
+        const total = typeof data.total === 'number' ? data.total : 0;
+        const items = Array.isArray(data.feedback) ? data.feedback : [];
 
-        const list = document.createElement("div");
-        data.feedback.forEach((item) => {
-            const container = document.createElement("div");
-            container.className = "feedback-item " + (item.is_correct ? "correct" : "incorrect");
+        const g = gradeFor(score, total);
+        const scoreCard = el('div', 'score-card');
+        scoreCard.appendChild(el('div', 'score-grade ' + g.cls, g.label));
+        scoreCard.appendChild(el('div', 'score-num', 'Score: ' + score + ' / ' + total));
+        scoreCard.appendChild(el('p', 'score-tip', g.tip));
+        results.appendChild(scoreCard);
 
-            const flags = (item.red_flags || []).map((f) => `<li>${escapeHtml(f)}</li>`).join("");
-            container.innerHTML =
-                `<div class="fb-head"><span class="fb-verdict">${item.is_correct ? "✓ Correct" : "✗ Incorrect"}</span>` +
-                `<span class="fb-cat">Scenario ${escapeHtml(String(item.id))} · ${escapeHtml(item.category || "")}</span></div>` +
-                `<p class="fb-q"><strong>Scenario:</strong> ${escapeHtml(item.question)}</p>` +
-                `<p class="fb-answers"><strong>Your answer:</strong> ${escapeHtml(item.your_answer || "No answer")} &nbsp;|&nbsp; <strong>Correct:</strong> ${escapeHtml(item.correct_answer)}</p>` +
-                `<p class="fb-explain">${escapeHtml(item.explanation || "")}</p>` +
-                (flags ? `<ul class="fb-flags">${flags}</ul>` : "") +
-                (item.action ? `<div class="fb-action"><strong>Safe habit:</strong> ${escapeHtml(item.action)}</div>` : "");
-            list.appendChild(container);
+        for (const item of items) {
+            results.appendChild(feedbackCard(item));
+        }
+
+        const actions = el('div', 'actions');
+        const retry = el('button', null, 'Retake quiz');
+        retry.setAttribute('type', 'button');
+        retry.addEventListener('click', function () {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         });
-        resultsDiv.appendChild(list);
+        actions.appendChild(retry);
+        results.appendChild(actions);
 
-        const retry = document.createElement("div");
-        retry.className = "actions";
-        retry.innerHTML = `<button type="button" id="retry-btn">Retake quiz</button>`;
-        resultsDiv.appendChild(retry);
-        document.getElementById("retry-btn").addEventListener("click", () => {
-            resultsDiv.scrollIntoView({ behavior: "smooth", block: "start" });
-            window.scrollTo({ top: 0, behavior: "smooth" });
-        });
-
-        resultsDiv.scrollIntoView({ behavior: "smooth" });
+        results.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    function escapeHtml(s) {
-        return String(s).replace(/[&<>"']/g, (c) => ({
-            "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-        })[c]);
+    function feedbackCard(item) {
+        const correct = item.is_correct === true;
+        const box = el('div', 'feedback-item ' + (correct ? 'correct' : 'incorrect'));
+
+        const head = el('div', 'fb-head');
+        head.appendChild(el('span', 'fb-verdict', correct ? 'Correct' : 'Incorrect'));
+        const meta = 'Scenario ' + asText(String(item.id)) +
+            (item.category ? ' · ' + asText(item.category) : '');
+        head.appendChild(el('span', 'fb-cat', meta));
+        box.appendChild(head);
+
+        box.appendChild(labeledLine('Scenario: ', asText(item.question), 'fb-q'));
+
+        const your = asText(item.your_answer) || 'No answer';
+        box.appendChild(labeledLine('Your answer: ', your + '  |  Correct: ' + asText(item.correct_answer), 'fb-answers'));
+
+        if (item.explanation) {
+            box.appendChild(el('p', 'fb-explain', asText(item.explanation)));
+        }
+
+        const flags = Array.isArray(item.red_flags) ? item.red_flags : [];
+        if (flags.length > 0) {
+            box.appendChild(el('p', 'fb-flags-label', 'Warning signs:'));
+            const list = el('ul', 'fb-flags');
+            for (const flag of flags) {
+                list.appendChild(el('li', null, asText(flag)));
+            }
+            box.appendChild(list);
+        }
+
+        if (item.action) {
+            const action = el('div', 'fb-action');
+            action.appendChild(el('span', 'fb-action-title', 'Recommended action: '));
+            action.appendChild(document.createTextNode(asText(item.action)));
+            box.appendChild(action);
+        }
+
+        return box;
     }
-});
+
+    function labeledLine(label, value, cls) {
+        const p = el('p', cls);
+        const strong = el('strong', null, label);
+        p.appendChild(strong);
+        p.appendChild(document.createTextNode(value));
+        return p;
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
