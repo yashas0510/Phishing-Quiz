@@ -6,6 +6,22 @@ app = Flask(
     static_folder="static",
 )
 
+# Vercel's rewrite forwards the *rewritten* destination path (``/api/index...``)
+# to the function instead of the original URL, which would 404 every Flask
+# route. Strip that prefix so the original path routes normally. Harmless
+# locally and under path-preserving routing (no-op when prefix is absent).
+_original_wsgi_app = app.wsgi_app
+
+
+def _path_normalizing_wsgi_app(environ, start_response):
+    path = environ.get("PATH_INFO", "") or ""
+    if path == "/api/index" or path.startswith("/api/index/"):
+        environ["PATH_INFO"] = path[len("/api/index"):] or "/"
+    return _original_wsgi_app(environ, start_response)
+
+
+app.wsgi_app = _path_normalizing_wsgi_app
+
 # ---------------------------------------------------------------------------
 # Question bank: modern, scenario-based, requires careful judgment.
 # Mix of phishing (11) and legitimate (3) so "always say phishing" fails.
